@@ -12,4 +12,3 @@ README.md
 docker-compose.yml
 **/venv
 **/env
-./app/secret.py

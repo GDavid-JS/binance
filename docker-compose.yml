@@ -15,11 +15,11 @@ services:
     networks:
       - mainnetwork
   project:
-    build: .
+    build: ./database_creator
     depends_on:
       - db
     volumes:
-      - ./app:/app
+      - ./database_creator:/database_creator
     networks:
       - mainnetwork
 
