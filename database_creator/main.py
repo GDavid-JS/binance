@@ -7,6 +7,7 @@ import asyncpg
 import secret
 from interfaces import Spot, Future
 
+
 class DatabaseSchemaCreator:
     '''
     Класс для создания и заполнения базы данных.
@@ -23,31 +24,33 @@ class DatabaseSchemaCreator:
         self.connection_params = connection_params
         self.interfaces = interfaces
 
-    def __call__(self):
-        '''
-        Запускает процесс создания и заполнения базы данных для каждого интерфейса.
-        '''
+        self.loop.run_until_complete(self.main())
+    
+    async def main(self):
         for interface in self.interfaces:
-            self.loop.run_until_complete(self.__init_connection(interface))
+            await self.__init_connection(interface)
 
             # Создание схем и таблиц
             stopwatch_start_time = time.time()
-            self.loop.run_until_complete(self.create_tickets(interface))
+            await self.create_tickets(interface)
             stopwatch_end_time = time.time()
-            print(stopwatch_end_time - stopwatch_start_time)
+            print('Создание схем и таблиц: ', stopwatch_end_time - stopwatch_start_time)
 
             # Получение задач и установка временных меток
             stopwatch_start_time = time.time()
-            self.loop.run_until_complete(self.get_tasks(interface))
+            tasks = await self.get_tasks(interface)
             stopwatch_end_time = time.time()
-            print(stopwatch_end_time - stopwatch_start_time)
+            res = stopwatch_end_time - stopwatch_start_time
+            print('Получение задач и установка временных меток: ', res)
+            if 1-res > 0:
+                time.sleep(1-res)
 
             # Вставка данных в базу данных
             stopwatch_start_time = time.time()
-            self.loop.run_until_complete(self.insert(interface))
+            await self.insert(interface, tasks)
             stopwatch_end_time = time.time()
-            print(stopwatch_end_time - stopwatch_start_time)
-    
+            print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
+
     async def __init_connection(self, interface):
         '''
         Функция создает пул соединений.
@@ -65,20 +68,56 @@ class DatabaseSchemaCreator:
 
         :param interface: Объект, представляющий интерфейс базы данных.
         '''
+        tasks = []
+        first_candle_time_params = []
         async with self.pool.acquire() as connection:
-            for ticket, schema, _ in interface:
-                for table in interface.tables:
+            for ticket, schema in interface:
+                for i, table in enumerate(interface.tables):
                     query = f'''
                         SELECT MAX(time_close)
                         FROM {schema}.{table}
                     '''
                     start_time = await connection.fetchval(query)
 
-                    interface.set_time(ticket, start_time)
+                    if start_time:
+                        tasks.append({
+                            'ticket': ticket,
+                            'interval': interface.intervals[i],
+                            'startTime': start_time,
+                            'schema': schema,
+                            'table': table
+                        })
+                    else:
+                        first_candle_time_params.append({
+                            'ticket': ticket,
+                            'interval': interface.intervals[i],
+                            'schema': schema,
+                            'table': table,
+                        })
+                        
         
-        await interface.get_times()
+        # first_candle_time_tasks = [
+        #     asyncio.create_task(interface.get_first_candle_time(
+        #         first_candle_time_task['ticket'],
+        #         first_candle_time_task['interval']
+        #     ))
+        #     for first_candle_time_task in first_candle_time_params
+        # ]
 
-    async def insert(self, interface):
+
+
+
+        # result = [time for time in await asyncio.gather(*first_candle_time_tasks)]
+
+        for i, task_params in enumerate(first_candle_time_params):
+            # tasks.append({**task_params, 'startTime': result[i], 'endTime': datetime.now()})
+            tasks.append({**task_params, 'startTime': datetime.now()-timedelta(4), 'endTime': datetime.now()})
+        
+
+
+        return tasks
+
+    async def insert(self, interface, insert_tasks):
         '''
         Вставляет данные в базу данных для каждой задачи в интерфейсе.
 
@@ -86,22 +125,25 @@ class DatabaseSchemaCreator:
         '''
         semaphore = asyncio.Semaphore(interface.max_connections)
 
-        async_tasks = []
-        
-        for ticket, schema, _ in interface:
-            for index in range(len(interface.intervals)):
-                start_time = int((datetime.now() - timedelta(days=1)).timestamp() * 1000)
-                async_tasks.append(
-                    asyncio.create_task(
-                        self.__insert_task(
-                            semaphore, interface, ticket, interface.intervals[index], start_time, schema, interface.tables[index]
-                        )
-                    )
+        tasks = [
+            asyncio.create_task(
+                self.__insert_task(
+                    semaphore,
+                    interface,
+                    item['schema'],
+                    item['table'],
+                    item['ticket'],
+                    item['interval'],
+                    item['startTime'],
+                    item['endTime'],
                 )
+            )
+            for item in insert_tasks
+        ]
 
-        await asyncio.gather(*async_tasks)
+        await asyncio.gather(*tasks)
 
-    async def __insert_task(self, semaphore, interface, ticket, interval, start_time, schema, table):
+    async def __insert_task(self, semaphore, interface, schema, table, *params):
         '''
         Асинхронно вставляет свечи (candles) в базу данных для указанной задачи, интервала и таблицы.
 
@@ -113,16 +155,19 @@ class DatabaseSchemaCreator:
         :param schema: Название схемы базы данных.
         :param table: Название таблицы базы данных.
         '''
-        async with semaphore:
-            candles = await interface.get_candles(ticket, interval, start_time)
-
-            async with self.pool.acquire() as connection:
+        async with self.pool.acquire() as connection:
+            async for candles in interface.get_candles(*params):
                 async with connection.transaction():
                     await connection.executemany(
-                        f'INSERT INTO {schema}.{table} VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                        f'''
+                        INSERT INTO {schema}.{table}
+                        VALUES ($1, $2, $3, $4, $5, $6, $7);
+                        ''',
                         candles
                     )
-
+                    # ON CONFLICT (time_close)
+                        # DO NOTHING;
+                            
     async def create_tickets(self, interface):
         '''
         Создает схемы и таблицы в базе данных для каждого интерфейса.
@@ -190,8 +235,6 @@ def main():
         database=secret.DATABASE
     )
 
-    binance()
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+    pass

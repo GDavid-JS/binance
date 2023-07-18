@@ -2,4 +2,4 @@ aiohttp==3.8.4
 asyncpg==0.28.0
 requests==2.31.0
 psycopg2==2.9.6
-accessify==0.3.1
+multipledispatch==1.0.0

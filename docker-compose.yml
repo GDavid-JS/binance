@@ -14,7 +14,7 @@ services:
       - ./postgresql:/var/lib/postgresql/data
     networks:
       - mainnetwork
-  project:
+  database_creator:
     build: ./database_creator
     depends_on:
       - db
@@ -22,6 +22,14 @@ services:
       - ./database_creator:/database_creator
     networks:
       - mainnetwork
+  # database_creator:
+  #   build: ./nn
+  #   depends_on:
+  #     - db
+  #   volumes:
+  #     - ./nn:/nn
+  #   networks:
+  #     - mainnetwork
 
 networks:
   mainnetwork:

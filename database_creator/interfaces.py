@@ -1,4 +1,9 @@
-from constans import INTERVALS_UNIQUE, INTERVALS, MAX_CANDLES_CONNECTIONS
+import asyncio
+from datetime import datetime
+
+from multipledispatch import dispatch
+
+from constans import INTERVALS_UNIQUE, INTERVALS, MAX_CANDLES_CONNECTIONS, INTERVALS_MILLISECONDS
 from binance import Binance
 from exchange import Exchange
 
@@ -17,24 +22,19 @@ class TemplateBinanceInterface(Binance, Exchange):
         :param kwargs: Именованные аргументы для базовых классов.
         '''
         super().__init__(*args, **kwargs)
-        self.common_data = [
-            {
-                'ticket': ticket,
-                'shema': f'{self._TYPE}_{ticket}',
-                'time': None
-            }
-            for ticket in Binance.get_all_tickets(f'{self._MAIN_URL}exchangeInfo')
-        ]
+        self._tickets = Binance.get_all_tickets(f'{self._MAIN_URL}exchangeInfo')
+        self._schemas = [f'{self._TYPE}_{ticket}' for ticket in self._tickets]
+        self._tables = [f'interval_{interval}' for interval in INTERVALS_UNIQUE]
 
     @property
     def max_connections(self):
         '''
-        Максимальное количество соединений для интерфейса.
+        Максимальное количество соединений для всех интерфейсов.
 
         :return: Максимальное количество соединений.
         '''
         return MAX_CANDLES_CONNECTIONS
-    
+
     @property
     def tickets(self):
         '''
@@ -42,7 +42,7 @@ class TemplateBinanceInterface(Binance, Exchange):
 
         :return: Список тикетов.
         '''
-        return [data['ticket'] for data in self.common_data]
+        return self._tickets
     
     @property
     def schemas(self):
@@ -51,16 +51,7 @@ class TemplateBinanceInterface(Binance, Exchange):
 
         :return: Список схем.
         '''
-        return [data['shema'] for data in self.common_data]
-    
-    @property
-    def times(self):
-        '''
-        Список временных меток с момента когда надо заполнить базу данных.
-
-        :return: Список временных меток.
-        '''
-        return [data['time'] for data in self.common_data]
+        return self._schemas
     
     @property
     def tables(self):
@@ -69,7 +60,7 @@ class TemplateBinanceInterface(Binance, Exchange):
 
         :return: Список таблиц.
         '''
-        return [f'interval_{interval}' for interval in INTERVALS_UNIQUE]
+        return self._tables
     
     @property
     def intervals(self):
@@ -80,19 +71,7 @@ class TemplateBinanceInterface(Binance, Exchange):
         '''
         return INTERVALS
     
-    def set_time(self, ticket, time):
-        '''
-        Устанавливает временную метку для тикета.
-
-        :param ticket: Тикет.
-        :param time: Временная метка.
-        '''
-        for data in self.common_data:
-            if data['ticket'] == ticket:
-                data['time'] = time
-    
-    @classmethod
-    async def get_candles(cls, ticket, interval, time):
+    async def get_candles(self, *args):
         '''
         Получает свечи (candles) для указанного тикета, интервала и временной метки.
 
@@ -101,28 +80,18 @@ class TemplateBinanceInterface(Binance, Exchange):
         :param time: Временная метка.
         :return: Свечи (candles).
         '''
-        return await super().get_candles(f'{cls._MAIN_URL}klines', symbol=ticket.upper(), interval=interval, startTime=time)
-    
-    async def get_times(self):
-        '''
-        Получает временные метки для тикетов, у которых временная метка еще не установлена.
-        '''
-        tickets = [data['ticket'] for data in self.common_data if data['time'] is None]
-        times = await super().times(f'{self._MAIN_URL}klines', tickets)
+        async for candles in super().get_candles(f'{self._MAIN_URL}klines', *args):
+            yield candles
 
-        i=0
-        for data in self.common_data:
-            if data['time'] is None:
-                data['time'] = times[i]
-                i+=1
+        # return await super().get_candles(f'{self._MAIN_URL}klines', *args)
+
+
+    async def get_first_candle_time(self, ticket, interval):
+        async for candles in super().get_candles(f'{self._MAIN_URL}klines', ticket, interval, datetime.fromtimestamp(0), 1):
+            return candles[0][0]
     
     def __iter__(self):
-        '''
-        Возвращает итератор, который перебирает тикеты, схемы и временные метки.
-
-        :return: Итератор, содержащий тикеты, схемы и временные метки.
-        '''
-        return zip(self.tickets, self.schemas, self.times)
+        return zip(self.tickets, self.schemas)
 
 
 class Spot(TemplateBinanceInterface):

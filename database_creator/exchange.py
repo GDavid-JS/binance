@@ -18,6 +18,14 @@ class Exchange(ABC):
         pass
 
     @property
+    def connections(self):
+        pass
+
+    @connections.setter
+    def connections(self, value):
+        pass
+
+    @property
     @abstractmethod
     def max_connections(self):
         '''
@@ -66,36 +74,9 @@ class Exchange(ABC):
         :return: Список интервалов.
         '''
         pass
-    
-    @property
-    @abstractmethod
-    def times(self):
-        '''
-        Список временных меток.
-
-        :return: Список временных меток.
-        '''
-        pass
 
     @abstractmethod
-    def set_time(self, ticket, time):
-        '''
-        Устанавливает временную метку для указанного тикета.
-
-        :param ticket: Тикет.
-        :param time: Временная метка.
-        '''
-        pass
-
-    @abstractmethod
-    def get_times(self):
-        '''
-        Получает временные метки для тикетов.
-        '''
-        pass
-
-    @abstractmethod
-    def get_candles(self, ticket, interval, time):
+    async def get_candles(self, ticket, interval, time):
         '''
         Получает свечи для указанного тикета, интервала и временной метки.
 
@@ -104,6 +85,10 @@ class Exchange(ABC):
         :param time: Временная метка.
         :return: Список свечей.
         '''
+        pass
+
+    @abstractmethod
+    async def get_first_candle_time(self, ticket, interval):
         pass
 
     @abstractmethod

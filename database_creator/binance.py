@@ -3,40 +3,23 @@ import hashlib
 import hmac
 import functools
 import time
+import math
 import urllib.parse
 from datetime import datetime
 
 import aiohttp
 import requests
+from multipledispatch import dispatch
 
 from constans import INTERVAL_1M, INTERVALS_MILLISECONDS, MAX_CANDLES_CONNECTIONS, CANDLES_DELAY
 from exchange import Exchange
 
-
-class Binance:
-    '''
-    Класс для работы с Binance API.
-
-    Он предоставляет методы для получения данных о тикетах, свечах и временных метках.
-    '''
-
-    SEMAPHORE = asyncio.Semaphore(MAX_CANDLES_CONNECTIONS)
-
-    def __init__(self, api_key, api_secret):
-        '''
-        Инициализация класса `Binance`.
-
-        :param api_key: Ключ API Binance.
-        :param api_secret: Секретный ключ API Binance.
-        '''
-        self.__API_KEY = api_key
-        self.__API_SECRET = api_secret
-    
-    def delay(func):
+def delay(candles_delay):
+    def decorator(func):
         '''
         Декоратор, добавляющий задержку между вызовами функции.
 
-        :param func: Функция, которую нужно обернуть.
+        :param candles_delay: Задержка между вызовами функции в секундах.
         :return: Обернутая функция с задержкой.
         '''
         @functools.wraps(func)
@@ -45,11 +28,54 @@ class Binance:
             result = await func(*args, **kwargs)
             end_time = time.time()
             
-            time_sleep = CANDLES_DELAY - (end_time - start_time)
+            time_sleep = candles_delay - (end_time - start_time)
             if time_sleep > 0:
                 await asyncio.sleep(time_sleep)
             return result
         return inner
+    return decorator
+
+class Binance(Exchange):
+    '''
+    Класс для работы с Binance API.
+
+    Он предоставляет методы для получения данных о тикетах, свечах и временных метках.
+    '''
+
+    CONNECTIONS = MAX_CANDLES_CONNECTIONS
+
+    def __init__(self, api_key, api_secret, connections=CONNECTIONS):
+        '''
+        Инициализация класса `Binance`.
+
+        :param api_key: Ключ API Binance.
+        :param api_secret: Секретный ключ API Binance.
+        '''
+        self.__API_KEY = api_key
+        self.__API_SECRET = api_secret
+        self.__connections = connections
+        self.__semaphore = asyncio.Semaphore(self.__connections)
+    
+
+    def __del__(self):
+        self.CONNECTIONS += self.__connections
+    
+    @property
+    def connections(self):
+        '''
+        Количество соединений для интерфейса.
+
+        :return: Максимальное количество соединений.
+        '''
+        return self.__connections
+    
+    @connections.setter
+    def connections(self, value):
+        if value < self.COCNNECTIONS:
+            self.__connections = value
+            self.COCNNECTIONS - value
+        else:
+            raise "Превышено максимальное количетсво подключений"
     
     @staticmethod
     def error_handler(response):
@@ -59,20 +85,6 @@ class Binance:
         :param response: Ответ от API Binance.
         '''
         print('Error: ', response)
-    
-    @classmethod
-    def get(cls, url):
-        '''
-        Отправляет GET-запрос к указанному URL и возвращает ответ в формате JSON.
-
-        :param url: URL для GET-запроса.
-        :return: Ответ в формате JSON.
-        '''
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-
-        cls.error_handler(response.json())
 
     @classmethod
     def get_all_tickets(cls, url):
@@ -82,11 +94,10 @@ class Binance:
         :param url: URL для получения списка тикетов.
         :return: Список тикетов.
         '''
-        return [coin['symbol'].lower() for coin in cls.get(url)['symbols']][:5]
-    
-    @classmethod
-    @delay
-    async def async_get(cls, url, **params):
+
+        return [coin['symbol'].lower() for coin in requests.get(url).json()['symbols'] if coin['isSpotTradingAllowed']][:10]
+
+    async def get(self, url, **params):
         '''
         Асинхронно отправляет GET-запрос к указанному URL с параметрами и возвращает ответ в формате JSON.
 
@@ -100,10 +111,18 @@ class Binance:
                 if response.status == 200:
                     return res
                 
-                cls.error_handler(res)
+                self.error_handler(res)
     
-    @classmethod
-    async def __get_candles_task(cls, url, **params):
+    @delay(CANDLES_DELAY)
+    async def session(self, url, session, **params):
+        async with session.get(url, params=params) as response:
+            res = await response.json()
+            if response.status == 200:
+                return res
+            
+            self.error_handler(res)
+
+    async def __get_candles_task(self, url, session, **params):
         '''
         Асинхронная задача для получения свечей (candles) для указанного URL и параметров.
 
@@ -111,11 +130,10 @@ class Binance:
         :param params: Параметры запроса.
         :return: Свечи (candles).
         '''
-        async with cls.SEMAPHORE:
-            return await cls.async_get(url, **params)
+        async with self.__semaphore:
+            return await self.session(url, session, **params)
 
-    @classmethod
-    async def get_candles(cls, url, **params):
+    async def get_candles(self, url, *args):
         '''
         Получает свечи (candles) для указанного URL и параметров.
 
@@ -123,54 +141,82 @@ class Binance:
         :param params: Параметры запроса.
         :return: Свечи (candles).
         '''
-        endTime = int(time.time() * 1000) if 'endTime' not in params else params['endTime']
+
+        params_list = self._generate_candle_params(*args)
+
+        async with aiohttp.ClientSession() as session:
+            tasks = [asyncio.create_task(self.__get_candles_task(url, session, **params)) for params in params_list]
+
+            for candles in asyncio.as_completed(tasks):
+                result = [
+                    (
+                        datetime.fromtimestamp(candl[0] / 1000),
+                        *(map(float, candl[1:6])),
+                        datetime.fromtimestamp(candl[6] / 1000)
+                    )
+                    for candl in await candles
+                ]
+
+                yield result
+    
+    def get_candle_interval(self, interval):
+        return INTERVALS_MILLISECONDS[interval]
+    
+    def __get_required_params(self, symbol, interval):
+        return {
+            'symbol': symbol.upper(),
+            'interval': interval,
+        }
+    
+    @dispatch(str, str, int)
+    def _generate_candle_params(self, symbol, interval, limit):
         params_list = []
+        params = self.__get_required_params(symbol, interval)
+        params['limit'] = limit
+        params_list.append(params)
+        return params_list
+    
+    @dispatch(str, str, datetime)
+    def _generate_candle_params(self, symbol, interval, startTime):
+        params_list = []
+        params = self.__get_required_params(symbol, interval)
+        params['startTime'] =  int(startTime.timestamp()*1000)
+        params_list.append(params)
+        return params_list
+    
+    @dispatch(str, str, datetime, int)
+    def _generate_candle_params(self, symbol, interval, startTime, limit):
+        params_list = []
+        params = self.__get_required_params(symbol, interval)
+        params['limit'] = limit
+        params['startTime'] =  int(startTime.timestamp()*1000)
+        params_list.append(params)
+        return params_list
+    
+    @dispatch(str, str, datetime, datetime)
+    def _generate_candle_params(self, symbol, interval, startTime, endTime):
+        return self._generate_candle_params(symbol, interval, startTime, endTime, 1000)
 
-        while True:
-            interval_time = INTERVALS_MILLISECONDS[params['interval']]
-            candles_len = int((endTime - params['startTime']) / interval_time)
-            params['limit'] = 1000 if candles_len > 1000 else candles_len
-            params['symbol'] = params['symbol'].upper()
+    @dispatch(str, str, datetime, datetime, int)
+    def _generate_candle_params(self, symbol, interval, startTime, endTime, limit):
+        params_list = []
+        params = self.__get_required_params(symbol, interval)
+        params['limit'] = 1000
 
-            if params['limit'] == 0:
-                break
+        startTime = int(startTime.timestamp() * 1000)
+        endTime = int(endTime.timestamp() * 1000)
+        candle_interval = self.get_candle_interval(interval)
+        time_diff = limit * candle_interval
 
-            params_list.append(params.copy())
+        while endTime > startTime:
+            params_copy = params.copy()
+            params_copy['startTime'] = startTime
+            params_copy['endTime'] = min(startTime + time_diff, endTime)
+            params_list.append(params_copy)
+            startTime = params_copy['endTime']
 
-            params['startTime'] += interval_time * 1000
+        return params_list
 
-            if params['limit'] != 1000:
-                break
-        
-
-        tasks = [asyncio.create_task(cls.__get_candles_task(url, **params)) for params in params_list]
-
-        return [
-            (
-                datetime.fromtimestamp(candl[0] / 1000),
-                *(map(float, candl[1:6])),
-                datetime.fromtimestamp(candl[6] / 1000)
-            )
-            for candles in await asyncio.gather(*tasks)
-            for candl in candles
-        ]
-
-    @classmethod
-    async def times(cls, url, tickets):
-        '''
-        Получает временные метки с начала IPO для указанных тикетов.
-        Не больше 83 годам и 4 месяцам назад.
-
-        :param url: URL для запроса временных меток.
-        :param tickets: Список тикетов.
-        :return: Список временных меток.
-        '''
-        tasks = [
-            asyncio.create_task(cls.__get_candles_task(url, symbol=ticket.upper(), interval=INTERVAL_1M, limit=1000))
-            for ticket in tickets
-        ]
-
-        return [element[0][0] for element in await asyncio.gather(*tasks)]
 
     def __use_keys(self, params, headers):
         '''
