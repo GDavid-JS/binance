@@ -4,32 +4,51 @@ services:
   db:
     container_name: db
     ports:
-      - 5433:5432
-    environment:
-      - POSTGRES_PASSWORD=root
-      - POSTGRES_USER=root
+      - 5433:${POSTGRES_PORT}
     image:
       postgres:15.3-alpine3.18
     volumes:
       - ./postgresql:/var/lib/postgresql/data
     networks:
       - mainnetwork
+    logging:
+      driver: none
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_PORT: "${POSTGRES_PORT}"
   database_creator:
     build: ./database_creator
+    command: python main.py
     depends_on:
       - db
     volumes:
       - ./database_creator:/database_creator
     networks:
       - mainnetwork
-  # database_creator:
-  #   build: ./nn
-  #   depends_on:
-  #     - db
-  #   volumes:
-  #     - ./nn:/nn
-  #   networks:
-  #     - mainnetwork
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_PORT: "${POSTGRES_PORT}"
+      HOST: "${HOST}"
+      NAME: "${NAME}"
+  # neural_network:
+    # build: ./nn
+    # command: python main.py
+    # depends_on:
+    #   - db
+    # volumes:
+    #   - ./nn:/nn
+    # networks:
+    #   - mainnetwork
+    # environment:
+    #   POSTGRES_USER: "${POSTGRES_USER}"
+    #   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    #   PORT: "${PORT}"
+    #   HOST: "${HOST}"
+    #   SOURCE_DATABASE: "${DATABASE_DC}"
+    #   DATABASE: "${DATABASE_NN}"
+  # # frontend:
 
 networks:
   mainnetwork:

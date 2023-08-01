@@ -10,5 +10,4 @@ __pycache__
 **/.ssh
 **/venv
 **/env
-**/secret.py
 nn

@@ -6,6 +6,4 @@ RUN pip install --user -r requirements.txt
 FROM python:3.9
 WORKDIR /database_creator
 COPY --from=builder /root/.local /root/.local
-COPY ./main.py .
 ENV PATH=/root/.local/bin:$PATH
-CMD ["python3", "main.py"]

@@ -7,7 +7,7 @@ __pycache__
 **/.env
 **/.aws
 **/.ssh
-Dockerfile
+**/Dockerfile
 README.md
 docker-compose.yml
 **/venv

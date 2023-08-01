@@ -3,3 +3,4 @@ asyncpg==0.28.0
 requests==2.31.0
 psycopg2==2.9.6
 multipledispatch==1.0.0
+SQLAlchemy==2.0.19
