@@ -18,54 +18,6 @@ class DatabaseSchemaCreator:
             max_size=interface.max_connections
         )
 
-    async def get_tasks(self, tickets, intervals, interface):
-        tasks = []
-        params = []
-        async with self.pool.acquire() as connection:
-            for ticket in tickets:
-                for interval in intervals:
-                    query = f'''
-                        SELECT MAX(time_close)
-                        FROM "{ticket}"."{interval}"
-                    '''
-                    start_time = await connection.fetchval(query)
-
-                    interval_time = interface.get_candle_interval(interval)
-
-                    if start_time:
-                        if start_time.timestamp() > datetime.now().timestamp()-interval_time:
-                            tasks.append({
-                                'ticket': ticket,
-                                'interval': interval,
-                                'startTime': start_time,
-                            })
-                    else:
-                        params.append({
-                            'ticket': ticket,
-                            'interval': interval,
-                        })
-
-        param_tasks = [
-            asyncio.create_task(interface.get_first_candle_time(
-                param['ticket'],
-                param['interval']
-            ))
-            for param in params
-        ]
-
-        result = [time for time in await asyncio.gather(*param_tasks)]
-
-
-
-        for task in tasks:
-            task['endTime'] =  datetime.now()
-
-        for i, task_params in enumerate(params):
-            tasks.append({**task_params, 'startTime': result[i], 'endTime': datetime.now()})
-            # tasks.append({**task_params, 'startTime': datetime.now()-timedelta(10), 'endTime': datetime.now()})
-        
-        return tasks
-
     async def insert(self, interface, insert_tasks):
         tasks = [
             asyncio.create_task(
@@ -125,6 +77,54 @@ class DatabaseSchemaCreator:
                             volume DOUBLE PRECISION NOT NULL,
                             time_close TIMESTAMP(3) PRIMARY KEY
                         );''')
+
+    async def get_tasks(self, tickets, intervals, interface):
+        tasks = []
+        params = []
+        async with self.pool.acquire() as connection:
+            for ticket in tickets:
+                for interval in intervals:
+                    query = f'''
+                        SELECT MAX(time_close)
+                        FROM "{ticket}"."{interval}"
+                    '''
+                    start_time = await connection.fetchval(query)
+
+                    interval_time = interface.get_candle_interval(interval)
+
+                    if start_time:
+                        if start_time.timestamp() > datetime.now().timestamp()-interval_time:
+                            tasks.append({
+                                'ticket': ticket,
+                                'interval': interval,
+                                'startTime': start_time,
+                            })
+                    else:
+                        params.append({
+                            'ticket': ticket,
+                            'interval': interval,
+                        })
+
+        param_tasks = [
+            asyncio.create_task(interface.get_first_candle_time(
+                param['ticket'],
+                param['interval']
+            ))
+            for param in params
+        ]
+
+        result = [time for time in await asyncio.gather(*param_tasks)]
+
+
+
+        for task in tasks:
+            task['endTime'] =  datetime.now()
+
+        for i, task_params in enumerate(params):
+            tasks.append({**task_params, 'startTime': result[i], 'endTime': datetime.now()})
+            # tasks.append({**task_params, 'startTime': datetime.now()-timedelta(10), 'endTime': datetime.now()})
+        
+        return tasks
 
     async def close(self):
         await self.pool.close()
