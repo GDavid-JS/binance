@@ -71,9 +71,9 @@ class DatabaseSchemaCreator:
                         await connection.execute(f'''CREATE TABLE "{schema}"."{table}" (
                             time_open TIMESTAMP NOT NULL,
                             open DOUBLE PRECISION NOT NULL,
-                            close DOUBLE PRECISION NOT NULL,
                             high DOUBLE PRECISION NOT NULL,
                             low DOUBLE PRECISION NOT NULL,
+                            close DOUBLE PRECISION NOT NULL,
                             volume DOUBLE PRECISION NOT NULL,
                             time_close TIMESTAMP(3) PRIMARY KEY
                         );''')
@@ -149,7 +149,7 @@ async def main():
 
     await binance.init_connection(interface)
 
-    tickets = interface.get_all_tickets()[:2]
+    tickets = [ticket for ticket in interface.get_all_tickets() if 'usdt' in ticket][:50]
 
     print(tickets)
 
@@ -167,11 +167,11 @@ async def main():
     print('Получение задач и установка временных меток: ', res)
 
 
-    # # Вставка данных в базу данных
-    # stopwatch_start_time = time.time()
-    # await binance.insert(interface, tasks)
-    # stopwatch_end_time = time.time()
-    # print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
+    # Вставка данных в базу данных
+    stopwatch_start_time = time.time()
+    await binance.insert(interface, tasks)
+    stopwatch_end_time = time.time()
+    print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
 
     await binance.close()
 

@@ -31,24 +31,25 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
       HOST: "${HOST}"
-      NAME: "${NAME}"
+      NAME: "${NAME1}"
   # neural_network:
-    # build: ./nn
-    # command: python main.py
-    # depends_on:
-    #   - db
-    # volumes:
-    #   - ./nn:/nn
-    # networks:
-    #   - mainnetwork
-    # environment:
-    #   POSTGRES_USER: "${POSTGRES_USER}"
-    #   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
-    #   PORT: "${PORT}"
-    #   HOST: "${HOST}"
-    #   SOURCE_DATABASE: "${DATABASE_DC}"
-    #   DATABASE: "${DATABASE_NN}"
-  # # frontend:
+  #   build: ./nn
+  #   command: python main.py
+  #   depends_on:
+  #     - db
+  #   volumes:
+  #     - ./nn:/nn
+  #     - /tmp/.X11-unix:/tmp/.X11-unix
+  #   networks:
+  #     - mainnetwork
+  #   environment:
+  #     POSTGRES_USER: "${POSTGRES_USER}"
+  #     POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+  #     PORT: "${PORT}"
+  #     HOST: "${HOST}"
+  #     NAME1: "${NAME1}"
+  #     NAME2: "${NAME2}"
+  #   runtime: nvidia
 
 networks:
   mainnetwork:
