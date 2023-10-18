@@ -85,10 +85,21 @@ def transfer_data(source_conn_params, target_conn_params):
         WHERE schema_name NOT LIKE 'pg_%'
         AND schema_name NOT IN ('information_schema', 'public')
     ''')
-    schemas = [row[0] for row in source_cursor.fetchall()]
+    schemas_source = [row[0] for row in source_cursor.fetchall()]
 
     target_conn = psycopg2.connect(**target_conn_params)
     target_cursor = target_conn.cursor()
+
+    target_cursor.execute('''
+        SELECT schema_name
+        FROM information_schema.schemata
+        WHERE schema_name NOT LIKE 'pg_%'
+        AND schema_name NOT IN ('information_schema', 'public')
+    ''')
+
+    schemas_target = [row[0] for row in target_cursor.fetchall()]
+
+    schemas = list(set(schemas_source) - set(schemas_target))
 
     for schema in schemas:
         target_cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')

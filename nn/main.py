@@ -37,29 +37,29 @@ def main():
 
     source_database = {**base_params, 'database': SOURCE_NAME}
     database = {**base_params, 'database': TARGET_NAME}
-    input_path = os.path.abspath(f'neural_networks/model3')
+    input_path = os.path.abspath(f'neural_networks/model1')
     output_path = os.path.abspath(f'neural_networks/model3')
 
     # transfer_data(source_database, database)
 
     inp_len = 100
-    timeframe = '30m'
+    timeframe = '1d'
     coin = 'btcusdt'
-    num_epochs = 500
-    batch_size = 256
+    num_epochs = 60
+    batch_size = 512
     early_stopping_patience=10
 
     # , return_sequences=True
-    # model = Sequential([
-    #     LSTM(256, input_shape=(inp_len, 1), return_sequences=True),
-    #     LSTM(128),
-    #     Dense(1, activation='sigmoid')
-    # ])
-
     model = Sequential([
-        LSTM(256, input_shape=(inp_len, 1), activation='relu'),
+        LSTM(256, input_shape=(inp_len, 1), return_sequences=True),
+        LSTM(128),
         Dense(1, activation='sigmoid')
     ])
+
+    # model = Sequential([
+    #     LSTM(256, input_shape=(inp_len, 1), activation='relu'),
+    #     Dense(1, activation='sigmoid')
+    # ])
 
     # model = Sequential([
     #     LSTM(64, input_shape=(inp_len, 1)),
@@ -68,12 +68,12 @@ def main():
     # ])
 
 
-    # model = load_model(input_path)
+    model = load_model(input_path)
 
 
     model.summary()
     optimizer = Adam(learning_rate=0.002)
-    model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['accuracy'])
 
 
     dataNN = DataNN(**database)
@@ -98,19 +98,19 @@ def main():
     end_time = time.time()
     print("Data loading time:", end_time - start_time)
 
-    X_train, X_temp, y_train, y_temp = train_test_split(X_array, y_array, test_size=0.3, random_state=42)
+    X_train, X_temp, y_train, y_temp = train_test_split(X_array, y_array, test_size=0.2, random_state=42)
     X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
 
     # , restore_best_weights=True
     early_stopping = EarlyStopping(monitor='val_accuracy', patience=early_stopping_patience)
 
-    history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=num_epochs, batch_size=batch_size, verbose=1)
-    # , callbacks=[early_stopping]
-
+    # history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=num_epochs, batch_size=batch_size, verbose=1)
+        # , callbacks=[early_stopping]
+        # , shuffle=False
     loss, accuracy = model.evaluate(X_test, y_test)
 
 
-    model.save(output_path)
+    # model.save(output_path)
 
 if __name__ == '__main__':
     # print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))

@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 from datetime import datetime, timedelta
+from flask import Flask
 
 import asyncpg
 from interfaces import Spot, Future
@@ -130,50 +131,56 @@ class DatabaseSchemaCreator:
         await self.pool.close()
 
 
-async def main():
-    USER = os.environ.get('POSTGRES_USER')
-    PASSWORD = os.environ.get('POSTGRES_PASSWORD')
-    HOST = os.environ.get('HOST')
-    PORT = os.environ.get('POSTGRES_PORT')
-    NAME = os.environ.get('NAME')
+# async def main():
+#     USER = os.environ.get('POSTGRES_USER')
+#     PASSWORD = os.environ.get('POSTGRES_PASSWORD')
+#     HOST = os.environ.get('HOST')
+#     PORT = os.environ.get('POSTGRES_PORT')
+#     NAME = os.environ.get('NAME')
 
-    interface = Spot()
+#     interface = Spot()
 
-    binance = DatabaseSchemaCreator(
-        user=USER,
-        password=PASSWORD,
-        host=HOST,
-        port=PORT,
-        database=NAME
-    )
+#     binance = DatabaseSchemaCreator(
+#         user=USER,
+#         password=PASSWORD,
+#         host=HOST,
+#         port=PORT,
+#         database=NAME
+#     )
 
-    await binance.init_connection(interface)
+#     await binance.init_connection(interface)
 
-    tickets = [ticket for ticket in interface.get_all_tickets() if 'usdt' in ticket][:50]
+#     tickets = [ticket for ticket in interface.get_all_tickets() if 'btcusdt' == ticket][:50]
 
-    print(tickets)
+#     print(tickets)
 
-    # Создание схем и таблиц
-    stopwatch_start_time = time.time()
-    await binance.create_tickets(tickets, interface.intervals)
-    stopwatch_end_time = time.time()
-    print('Создание схем и таблиц: ', stopwatch_end_time - stopwatch_start_time)
+#     # Создание схем и таблиц
+#     stopwatch_start_time = time.time()
+#     await binance.create_tickets(tickets, interface.intervals)
+#     stopwatch_end_time = time.time()
+#     print('Создание схем и таблиц: ', stopwatch_end_time - stopwatch_start_time)
 
-    # # Получение задач и установка временных меток
-    stopwatch_start_time = time.time()
-    tasks = await binance.get_tasks(tickets, interface.intervals, interface)
-    stopwatch_end_time = time.time()
-    res = stopwatch_end_time - stopwatch_start_time
-    print('Получение задач и установка временных меток: ', res)
+#     # Получение задач и установка временных меток
+#     stopwatch_start_time = time.time()
+#     tasks = await binance.get_tasks(tickets, interface.intervals, interface)
+#     stopwatch_end_time = time.time()
+#     res = stopwatch_end_time - stopwatch_start_time
+#     print('Получение задач и установка временных меток: ', res)
 
+#     # Вставка данных в базу данных
+#     stopwatch_start_time = time.time()
+#     await binance.insert(interface, tasks)
+#     stopwatch_end_time = time.time()
+#     print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
 
-    # Вставка данных в базу данных
-    stopwatch_start_time = time.time()
-    await binance.insert(interface, tasks)
-    stopwatch_end_time = time.time()
-    print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
+#     await binance.close()
 
-    await binance.close()
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return 'Hello, Flask!'
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    app.run(host='0.0.0.0', port=5000)
+    # asyncio.run(main())
