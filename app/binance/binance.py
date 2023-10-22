@@ -10,7 +10,7 @@ import aiohttp
 import requests
 from multipledispatch import dispatch
 
-from constans import MAX_CANDLES_CONNECTIONS, CANDLES_DELAY
+from .constans import MAX_CANDLES_CONNECTIONS, CANDLES_DELAY, INTERVALS_MILLISECONDS
 
 def delay(candles_delay):
     def decorator(func):
@@ -35,8 +35,7 @@ class Binance:
 
     @classmethod
     def get_all_tickets(cls, url):
-        res = [coin['symbol'].lower() for coin in requests.get(url).json()['symbols']]
-        return res
+        return [coin['symbol'].lower() for coin in requests.get(url).json()['symbols']]
 
     async def get(self, url, **params):
         async with aiohttp.ClientSession() as session:
@@ -52,12 +51,8 @@ class Binance:
     @candles_delay
     async def session(self, url, session, **params):
         async with session.get(url, params=params) as response:
-            res = await response.json()
-            if response.status == 200:
-                return res
+            return await response.json()
             
-            self.error_handler(res)
-
     async def __get_candles_task(self, url, session, **params):
         async with self.__semaphore:
             return await self.session(url, session, **params)
@@ -121,7 +116,7 @@ class Binance:
 
         startTime = int(startTime.timestamp() * 1000)
         endTime = int(endTime.timestamp() * 1000)
-        candle_interval = self.get_candle_interval(interval)
+        candle_interval = INTERVALS_MILLISECONDS[interval]
         time_diff = limit * candle_interval
 
         while endTime > startTime:
@@ -134,18 +129,18 @@ class Binance:
         return params_list
 
 
-    def __use_keys(self, params, headers):
-        '''
-        Добавляет ключи API и подпись к параметрам и заголовкам запроса.
+    # def __use_keys(self, params, headers):
+    #     '''
+    #     Добавляет ключи API и подпись к параметрам и заголовкам запроса.
 
-        :param params: Параметры запроса.
-        :param headers: Заголовки запроса.
-        '''
-        timestamp = int(time.time() * 1000)
-        params['timestamp'] = timestamp
+    #     :param params: Параметры запроса.
+    #     :param headers: Заголовки запроса.
+    #     '''
+    #     timestamp = int(time.time() * 1000)
+    #     params['timestamp'] = timestamp
 
-        query_string = urllib.parse.urlencode(params)
-        signature = hmac.new(self.__API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    #     query_string = urllib.parse.urlencode(params)
+    #     signature = hmac.new(self.__API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
-        params['signature'] = signature
-        headers['X-MBX-APIKEY'] = self.__API_KEY
+    #     params['signature'] = signature
+    #     headers['X-MBX-APIKEY'] = self.__API_KEY

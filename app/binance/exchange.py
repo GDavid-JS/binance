@@ -10,10 +10,6 @@ class Exchange(ABC):
     @abstractmethod
     def intervals(self):
         pass
-
-    @abstractmethod
-    def get_candle_interval(self, interval):
-        pass
     
     @abstractmethod
     def get_all_tickets(self):

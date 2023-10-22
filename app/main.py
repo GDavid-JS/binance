@@ -2,185 +2,92 @@ import os
 import asyncio
 import time
 from datetime import datetime, timedelta
-from flask import Flask
 
 import asyncpg
-from interfaces import Spot, Future
+from binance import Spot, Future
+from flask import Flask, render_template, request
+from flask_sqlalchemy import SQLAlchemy
+
+from routes import IndexView
 
 
-class DatabaseSchemaCreator:
-    def __init__(self, **connection_params):
-        self.connection_params = connection_params
+# class DatabaseManager:
+#     def __init__(self, interface, **connection_params):
+#         self.connection_params = connection_params
+#         self.interface = interface
 
-    async def init_connection(self, interface):
+#     async def init_connection(self):
+#         self.pool = await asyncpg.create_pool(
+#             **self.connection_params,
+#             max_size=self.interface.max_connections
+#         )
 
-        self.pool = await asyncpg.create_pool(
-            **self.connection_params,
-            max_size=interface.max_connections
-        )
+    # async def insert(self, tasks):
+    #     insert_tasks = []
 
-    async def insert(self, interface, insert_tasks):
-        tasks = [
-            asyncio.create_task(
-                self.__insert_task(
-                    interface,
-                    item['ticket'],
-                    item['interval'],
-                    item['startTime'],
-                    item['endTime'],
-                )
-            )
-            for item in insert_tasks
-        ]
+    #     async with self.pool.acquire() as connection:
+    #         for task in tasks:
+    #             schema = task['ticket']
+    #             table = task['interval']
 
-        await asyncio.gather(*tasks)
+    #             async with connection.transaction():
+    #                 await connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}";')
 
-    async def __insert_task(self, interface, ticket, interval, start_time, end_time):
-        async with self.pool.acquire() as connection:
-            async for candles in interface.get_candles(ticket, interval, start_time, end_time):
-                async with connection.transaction():
-                    await connection.executemany(
-                        f'''
-                        INSERT INTO "{ticket}"."{interval}"
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (time_close)
-                        DO NOTHING;
-                        ''',
-                        candles
-                    )
-                            
-    async def create_tickets(self, schemas, tables):
-        async with self.pool.acquire() as connection:
-            existing_schemas = [
-                row[0]
-                for row in await connection.fetch(
-                    '''
-                    SELECT schema_name
-                    FROM information_schema.schemata
-                    WHERE schema_name NOT IN ('public', 'information_schema', 'pg_catalog', 'pg_toast')
-                    '''
-                )
-            ]
+    #                 await connection.execute(f'''CREATE TABLE IF NOT EXISTS "{schema}"."{table}" (
+    #                         time_open TIMESTAMP NOT NULL,
+    #                         open DOUBLE PRECISION NOT NULL,
+    #                         high DOUBLE PRECISION NOT NULL,
+    #                         low DOUBLE PRECISION NOT NULL,
+    #                         close DOUBLE PRECISION NOT NULL,
+    #                         volume DOUBLE PRECISION NOT NULL,
+    #                         time_close TIMESTAMP(3) PRIMARY KEY
+    #                     );''')
+                    
+    #             insert_tasks.append(asyncio.create_task(self.__insert_task(**task)))
 
-            missing_schemas = [schema for schema in schemas if schema not in existing_schemas]
+    #     await asyncio.gather(*insert_tasks)
 
-            for schema in missing_schemas:
-                async with connection.transaction():
-                    await connection.execute(f'CREATE SCHEMA "{schema}";')
+#     async def __insert_task(self, ticket, interval, start_time, end_time):
+#         async with self.pool.acquire() as connection:
+#             async for candles in self.interface.get_candles(ticket, interval, start_time, end_time):
+#                 async with connection.transaction():
+#                     await connection.executemany(
+#                         f'''
+#                         INSERT INTO "{ticket}"."{interval}"
+#                         VALUES ($1, $2, $3, $4, $5, $6, $7)
+#                         ON CONFLICT (time_close)
+#                         DO NOTHING;
+#                         ''',
+#                         candles
+#                     )
 
-                    for table in tables:
-                        await connection.execute(f'''CREATE TABLE "{schema}"."{table}" (
-                            time_open TIMESTAMP NOT NULL,
-                            open DOUBLE PRECISION NOT NULL,
-                            high DOUBLE PRECISION NOT NULL,
-                            low DOUBLE PRECISION NOT NULL,
-                            close DOUBLE PRECISION NOT NULL,
-                            volume DOUBLE PRECISION NOT NULL,
-                            time_close TIMESTAMP(3) PRIMARY KEY
-                        );''')
+#     async def close(self):
+#         await self.pool.close()
 
-    async def get_tasks(self, tickets, intervals, interface):
-        tasks = []
-        params = []
-        async with self.pool.acquire() as connection:
-            for ticket in tickets:
-                for interval in intervals:
-                    query = f'''
-                        SELECT MAX(time_close)
-                        FROM "{ticket}"."{interval}"
-                    '''
-                    start_time = await connection.fetchval(query)
-
-                    interval_time = interface.get_candle_interval(interval)
-
-                    if start_time:
-                        if start_time.timestamp() > datetime.now().timestamp()-interval_time:
-                            tasks.append({
-                                'ticket': ticket,
-                                'interval': interval,
-                                'startTime': start_time,
-                            })
-                    else:
-                        params.append({
-                            'ticket': ticket,
-                            'interval': interval,
-                        })
-
-        param_tasks = [
-            asyncio.create_task(interface.get_first_candle_time(
-                param['ticket'],
-                param['interval']
-            ))
-            for param in params
-        ]
-
-        result = [time for time in await asyncio.gather(*param_tasks)]
-
-
-
-        for task in tasks:
-            task['endTime'] =  datetime.now()
-
-        for i, task_params in enumerate(params):
-            tasks.append({**task_params, 'startTime': result[i], 'endTime': datetime.now()})
-            # tasks.append({**task_params, 'startTime': datetime.now()-timedelta(10), 'endTime': datetime.now()})
-        
-        return tasks
-
-    async def close(self):
-        await self.pool.close()
-
-
-# async def main():
-#     USER = os.environ.get('POSTGRES_USER')
-#     PASSWORD = os.environ.get('POSTGRES_PASSWORD')
-#     HOST = os.environ.get('HOST')
-#     PORT = os.environ.get('POSTGRES_PORT')
-#     NAME = os.environ.get('NAME')
-
-#     interface = Spot()
-
-#     binance = DatabaseSchemaCreator(
-#         user=USER,
-#         password=PASSWORD,
-#         host=HOST,
-#         port=PORT,
-#         database=NAME
-#     )
-
-#     await binance.init_connection(interface)
-
-#     tickets = [ticket for ticket in interface.get_all_tickets() if 'btcusdt' == ticket][:50]
-
-#     print(tickets)
-
-#     # Создание схем и таблиц
-#     stopwatch_start_time = time.time()
-#     await binance.create_tickets(tickets, interface.intervals)
-#     stopwatch_end_time = time.time()
-#     print('Создание схем и таблиц: ', stopwatch_end_time - stopwatch_start_time)
-
-#     # Получение задач и установка временных меток
-#     stopwatch_start_time = time.time()
-#     tasks = await binance.get_tasks(tickets, interface.intervals, interface)
-#     stopwatch_end_time = time.time()
-#     res = stopwatch_end_time - stopwatch_start_time
-#     print('Получение задач и установка временных меток: ', res)
-
-#     # Вставка данных в базу данных
-#     stopwatch_start_time = time.time()
-#     await binance.insert(interface, tasks)
-#     stopwatch_end_time = time.time()
-#     print('Запросы и вставка данных в базу данных: ', stopwatch_end_time - stopwatch_start_time)
-
-#     await binance.close()
+# binance = DatabaseManager(
+#     interface=spot,
+#     user=USER,
+#     password=PASSWORD,
+#     host=HOST,
+#     port=PORT,
+#     database=NAME
+# )
 
 app = Flask(__name__)
 
-@app.route('/')
-def hello():
-    return 'Hello, Flask!'
-
 if __name__ == '__main__':
+    USER = os.environ.get('POSTGRES_USER')
+    PASSWORD = os.environ.get('POSTGRES_PASSWORD')
+    HOST = os.environ.get('HOST')
+    PORT = os.environ.get('POSTGRES_PORT')
+    NAME = os.environ.get('NAME')
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{NAME}'
+    db = SQLAlchemy(app)
+
+    spot = Spot()
+    tickets = spot.get_all_tickets()
+    index_view = IndexView.as_view('index', tickets=tickets)
+    app.add_url_rule('/', view_func=index_view)
     app.run(host='0.0.0.0', port=5000)
-    # asyncio.run(main())
+

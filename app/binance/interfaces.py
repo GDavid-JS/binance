@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from constans import INTERVALS, MAX_CANDLES_CONNECTIONS, INTERVALS_MILLISECONDS
-from binance import Binance
-from exchange import Exchange
+from .constans import INTERVALS, MAX_CANDLES_CONNECTIONS, INTERVALS_MILLISECONDS
+from .binance import Binance
+from .exchange import Exchange
 
 class TemplateBinanceInterface(Binance, Exchange):
     @property
@@ -12,9 +12,6 @@ class TemplateBinanceInterface(Binance, Exchange):
     @property
     def intervals(self):
         return INTERVALS
-
-    def get_candle_interval(self, interval):
-        return INTERVALS_MILLISECONDS[interval]
     
     def get_all_tickets(self):
         return super().get_all_tickets(f'{self._MAIN_URL}exchangeInfo')
