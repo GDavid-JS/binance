@@ -28,6 +28,8 @@ services:
     networks:
       - mainnetwork
     environment:
+      FLASK_APP: main.py
+      FLASK_ENV: development
       POSTGRES_USER: "${POSTGRES_USER}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
