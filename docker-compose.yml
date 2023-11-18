@@ -28,28 +28,24 @@ services:
     networks:
       - mainnetwork
     environment:
-      FLASK_APP: main.py
-      FLASK_ENV: development
       POSTGRES_USER: "${POSTGRES_USER}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
       HOST: "${HOST}"
       NAME: "${NAME1}"
-    expose:
-      - 5000
-  nginx:
-    container_name: nginx
-    build:
-      context: ./nginx/
-      dockerfile: Dockerfile
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    ports:
-      - 8080:80
-    depends_on:
-      - app
-    networks:
-      - mainnetwork
+  # nginx:
+  #   container_name: nginx
+  #   build:
+  #     context: ./nginx/
+  #     dockerfile: Dockerfile
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+  #   ports:
+  #     - 8080:80
+  #   depends_on:
+  #     - app
+  #   networks:
+  #     - mainnetwork
   # neural_network:
   #   container_name: nn
   #   build: ./nn
