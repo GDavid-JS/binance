@@ -4,13 +4,11 @@ import hmac
 import functools
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 import requests
 from multipledispatch import dispatch
-
-from constans import MAX_CANDLES_CONNECTIONS, CANDLES_DELAY, INTERVALS_MILLISECONDS
 
 def delay(candles_delay):
     def decorator(func):
@@ -27,11 +25,21 @@ def delay(candles_delay):
         return inner
     return decorator
 
-class Binance:
-    candles_delay = delay(CANDLES_DELAY)
+candles_delay = delay(1.2)
 
-    def __init__(self):
-        self.__semaphore = asyncio.Semaphore(MAX_CANDLES_CONNECTIONS)
+class Binance:
+    _shared_state = {
+        '_semaphore': None
+    }
+
+    def __new__(cls):
+        if cls._shared_state.get('_semaphore') is None:
+            cls._shared_state['_semaphore'] = asyncio.Semaphore(20)
+
+        obj = super(Binance, cls).__new__(cls)
+        obj.__dict__ = cls._shared_state
+
+        return obj
 
     @classmethod
     def get_all_tickets(cls, url):
@@ -43,12 +51,12 @@ class Binance:
             return await response.json()
 
     async def __get_candles_task(self, url, session, **params):
-        async with self.__semaphore:
+        async with self._semaphore:
             return await self.session(url, session, **params)
 
-    async def get_candles(self, url, *args):
+    async def get_candles(self, url, symbol, interval, start_time, end_time):
         async with aiohttp.ClientSession() as session:
-            tasks = [asyncio.create_task(self.__get_candles_task(url, session, **binance_task)) for binance_task in self.__get_binance_tasks(*args)]
+            tasks = [asyncio.create_task(self.__get_candles_task(url, session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
 
             for candles in asyncio.as_completed(tasks):
                 yield (
@@ -60,25 +68,25 @@ class Binance:
                     for candl in await candles
                 )
 
-    def __get_binance_tasks(self, symbol, interval, startTime, endTime):
+    def __get_binance_tasks(self, symbol, interval, start_time, end_time):
         params_list = []
         params = {
             'symbol': symbol.upper(),
-            'interval': interval,
+            'interval': interval.value,
         }
 
         params['limit'] = 1000
 
-        startTime = int(startTime.timestamp() * 1000)
-        endTime = int(endTime.timestamp() * 1000)
-        candle_interval = INTERVALS_MILLISECONDS[interval]
+        start_time = int(start_time.timestamp() * 1000)
+        end_time = int(end_time.timestamp() * 1000)
+        candle_interval = interval.to_milliseconds()
         time_diff = params['limit'] * candle_interval
 
-        while endTime > startTime:
+        while end_time > start_time:
             params_copy = params.copy()
-            params_copy['startTime'] = startTime
-            params_copy['endTime'] = min(startTime + time_diff, endTime)
+            params_copy['startTime'] = start_time
+            params_copy['endTime'] = min(start_time + time_diff, end_time)
             params_list.append(params_copy)
-            startTime = params_copy['endTime']
+            start_time = params_copy['endTime']
 
         return params_list

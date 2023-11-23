@@ -3,7 +3,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-from interfaces import Future, Spot
+from binance import Future, Spot, TimeInterval
 
 import asyncpg
 
@@ -17,14 +17,14 @@ class Task:
         self.end_time = end_time
 
 class DataProcessor:
-    async def init_connection(self, user, password, host, port, database):
+    async def init_connection(self, user, password, host, port, database, max_size):
         self.pool = await asyncpg.create_pool(
             user=user,
             password=password,
             host=host,
             port=port,
             database=database,
-            max_size=10
+            max_size=max_size
         )
     
     async def create_ticket(self, task):
@@ -61,6 +61,7 @@ class DataProcessor:
                             candles
                     )
 
+
 async def main():
     user = os.environ.get('POSTGRES_USER')
     password = os.environ.get('POSTGRES_PASSWORD')
@@ -69,7 +70,7 @@ async def main():
     database = os.environ.get('NAME')
 
     tasks = [
-        Task('btcusdt', '1d', datetime.now() - timedelta(days=10), datetime.now())
+        Task('btcusdt', TimeInterval.INTERVAL_1D, datetime.now() - timedelta(days=10), datetime.now())
     ]
 
     insert_tasks = []
@@ -77,7 +78,7 @@ async def main():
     spot = Spot()
     data_processor = DataProcessor()
     
-    await data_processor.init_connection(user, password, host, port, database)
+    await data_processor.init_connection(user, password, host, port, database, 20)
 
     for task in tasks:
         await data_processor.create_ticket(task)
