@@ -5,10 +5,6 @@ from binance import Binance
 from exchange import Exchange
 
 class TemplateBinanceInterface(Binance, Exchange):
-    @property
-    def max_connections():
-        return MAX_CANDLES_CONNECTIONS
-
     def get_all_tickets(self):
         return super().get_all_tickets(f'{self._MAIN_URL}exchangeInfo')
 

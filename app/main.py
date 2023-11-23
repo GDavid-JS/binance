@@ -7,68 +7,84 @@ from interfaces import Future, Spot
 
 import asyncpg
 
-async def create_ticket(pool, interface, tasks):
-    insert_tasks = []
+class Task:
+    __slots__ = ('ticket', 'interval', 'start_time', 'end_time')
 
-    async with pool.acquire() as connection:
-        for task in tasks:
-            schema = task['ticket']
-            table = task['interval']
+    def __init__(self, ticket, interval, start_time, end_time):
+        self.ticket = ticket
+        self.interval = interval
+        self.start_time = start_time
+        self.end_time = end_time
 
-            async with connection.transaction():
-                await connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}";')
+class DataProcessor:
+    async def init_connection(self, user, password, host, port, database):
+        self.pool = await asyncpg.create_pool(
+            user=user,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+            max_size=10
+        )
+    
+    async def create_ticket(self, task):
+        if type(task) == Task:
+            async with self.pool.acquire() as connection:
+                schema = task.ticket
+                table = task.interval
 
-                await connection.execute(f'''CREATE TABLE IF NOT EXISTS "{schema}"."{table}" (
-                        time_open TIMESTAMP NOT NULL,
-                        open DOUBLE PRECISION NOT NULL,
-                        high DOUBLE PRECISION NOT NULL,
-                        low DOUBLE PRECISION NOT NULL,
-                        close DOUBLE PRECISION NOT NULL,
-                        volume DOUBLE PRECISION NOT NULL,
-                        time_close TIMESTAMP(3) PRIMARY KEY
-                    );''')
-            insert_tasks.append(asyncio.create_task(task(pool, interface, *task.values())))
+                async with connection.transaction():
+                    await connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}";')
 
-    await asyncio.gather(*insert_tasks)
-
-
-async def insert_ticket(pool, interface, ticket, interval, start_time, end_time):
-    async with pool.acquire() as connection:
-        async for candles in interface.get_candles(ticket, interval, start_time, end_time):
-            async with connection.transaction():
-                await connection.executemany(
-                    f'''
-                    INSERT INTO "{ticket}"."{interval}"
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (time_close)
-                    DO NOTHING;
-                    ''',
-                    candles
-                )
+                    await connection.execute(f'''CREATE TABLE IF NOT EXISTS "{schema}"."{table}" (
+                            time_open TIMESTAMP NOT NULL,
+                            open DOUBLE PRECISION NOT NULL,
+                            high DOUBLE PRECISION NOT NULL,
+                            low DOUBLE PRECISION NOT NULL,
+                            close DOUBLE PRECISION NOT NULL,
+                            volume DOUBLE PRECISION NOT NULL,
+                            time_close TIMESTAMP(3) PRIMARY KEY
+                        );''')
+    
+    async def insert_ticket(self, interface, task):
+        if type(task) == Task:
+            async with self.pool.acquire() as connection:
+                async for candles in interface.get_candles(task.ticket, task.interval, task.start_time, task.end_time):
+                    async with connection.transaction():
+                        await connection.executemany(
+                            f'''
+                            INSERT INTO "{task.ticket}"."{task.interval}"
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            ON CONFLICT (time_close)
+                            DO NOTHING;
+                            ''',
+                            candles
+                    )
 
 async def main():
-    USER = os.environ.get('POSTGRES_USER')
-    PASSWORD = os.environ.get('POSTGRES_PASSWORD')
-    HOST = os.environ.get('HOST')
-    PORT = os.environ.get('POSTGRES_PORT')
-    NAME = os.environ.get('NAME')
-
-    spot = Spot()
-
-    pool = await asyncpg.create_pool(
-        user=USER,
-        password=PASSWORD,
-        host=HOST,
-        port=PORT,
-        database=NAME,
-        max_size=10
-    )
+    user = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    host = os.environ.get('HOST')
+    port = os.environ.get('POSTGRES_PORT')
+    database = os.environ.get('NAME')
 
     tasks = [
-        {'ticket': 'btcusdt', 'interval': '1d', 'start_time': datetime.now() - timedelta(days=10), 'end_time': datetime.now()}
+        Task('btcusdt', '1d', datetime.now() - timedelta(days=10), datetime.now())
     ]
 
-    await create_ticket(pool, spot, tasks)
+    insert_tasks = []
+
+    spot = Spot()
+    data_processor = DataProcessor()
+    
+    await data_processor.init_connection(user, password, host, port, database)
+
+    for task in tasks:
+        await data_processor.create_ticket(task)
+        insert_tasks.append(asyncio.create_task(data_processor.insert_ticket(spot, task)))
+    
+    await asyncio.gather(*insert_tasks)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
