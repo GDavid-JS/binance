@@ -1,72 +1,67 @@
 import asyncio
-import hashlib
-import hmac
 import functools
 import time
-import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
+from abc import ABC, abstractmethod
 
 import aiohttp
-import requests
-from multipledispatch import dispatch
 
-def delay(candles_delay):
-    def decorator(func):
-        @functools.wraps(func)
-        async def inner(*args, **kwargs):
-            start_time = time.time()
-            result = await func(*args, **kwargs)
-            end_time = time.time()
-            
-            time_sleep = candles_delay - (end_time - start_time)
-            if time_sleep > 0:
-                await asyncio.sleep(time_sleep)
-            return result
-        return inner
-    return decorator
+from .interval import TimeInterval
 
-candles_delay = delay(1.2)
+def delay(func):
+    @functools.wraps(func)
+    async def inner(*args, **kwargs):
+        start_time = time.time()
+        result = await func(*args, **kwargs)
+        end_time = time.time()
+        
+        time_sleep = 1.2 - (end_time - start_time)
+        if time_sleep > 0:
+            await asyncio.sleep(time_sleep)
+        return result
+    return inner
 
-class Binance:
-    _shared_state = {
-        '_semaphore': None
-    }
+class Exchange(ABC):
+    @abstractmethod
+    async def get_candles(self, symbol, interval, start_time, end_time):
+        pass
+
+
+class Binance(Exchange):
+    __semaphore = None
 
     def __new__(cls):
-        if cls._shared_state.get('_semaphore') is None:
-            cls._shared_state['_semaphore'] = asyncio.Semaphore(20)
+        if cls.__semaphore is None:
+            cls.__semaphore = asyncio.Semaphore(20)
 
-        obj = super(Binance, cls).__new__(cls)
-        obj.__dict__ = cls._shared_state
+        return super().__new__(cls)
+    
+    def __init__(self, url):
+        self.url = url
 
-        return obj
-
-    @classmethod
-    def get_all_tickets(cls, url):
-        return [coin['symbol'].lower() for coin in requests.get(url).json()['symbols']]
-
-    @candles_delay
-    async def session(self, url, session, **params):
+    @delay
+    async def __session(self, url, session, **params):
         async with session.get(url, params=params) as response:
             return await response.json()
 
     async def __get_candles_task(self, url, session, **params):
-        async with self._semaphore:
-            return await self.session(url, session, **params)
+        async with self.__semaphore:
+            return await self.__session(url, session, **params)
 
-    async def get_candles(self, url, symbol, interval, start_time, end_time):
-        async with aiohttp.ClientSession() as session:
-            tasks = [asyncio.create_task(self.__get_candles_task(url, session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
+    async def get_candles(self, symbol, interval, start_time, end_time):
+        if isinstance(interval, TimeInterval) and isinstance(start_time, datetime) and isinstance(end_time, datetime):
+            async with aiohttp.ClientSession() as session:
+                tasks = [asyncio.create_task(self.__get_candles_task(self.url, session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
 
-            for candles in asyncio.as_completed(tasks):
-                yield (
-                    (
-                        datetime.fromtimestamp(candl[0] / 1000),
-                        *(map(float, candl[1:6])),
-                        datetime.fromtimestamp(candl[6] / 1000)
+                for candles in asyncio.as_completed(tasks):
+                    yield (
+                        (
+                            datetime.fromtimestamp(candl[0] / 1000),
+                            *(map(float, candl[1:6])),
+                            datetime.fromtimestamp(candl[6] / 1000)
+                        )
+                        for candl in await candles
                     )
-                    for candl in await candles
-                )
 
     def __get_binance_tasks(self, symbol, interval, start_time, end_time):
         params_list = []
@@ -90,3 +85,12 @@ class Binance:
             start_time = params_copy['endTime']
 
         return params_list
+    
+
+class Spot(Binance):
+    def __init__(self):
+        super().__init__('https://api.binance.com/api/v3')
+
+class Future(Binance):
+    def __init__(self):
+        super().__init__('https://fapi.binance.com/api/v1')

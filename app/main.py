@@ -69,6 +69,7 @@ async def main():
     port = os.environ.get('POSTGRES_PORT')
     database = os.environ.get('NAME')
 
+
     tasks = [
         Task('btcusdt', TimeInterval.INTERVAL_1D, datetime.now() - timedelta(days=10), datetime.now())
     ]

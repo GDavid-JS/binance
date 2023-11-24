@@ -1,2 +1,2 @@
-from .interfaces import Future, Spot
+from .binance import Future, Spot
 from .interval import TimeInterval
