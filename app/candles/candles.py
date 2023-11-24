@@ -21,13 +21,13 @@ def delay(func):
         return result
     return inner
 
-class Exchange(ABC):
+class Candles(ABC):
     @abstractmethod
     async def get_candles(self, symbol, interval, start_time, end_time):
         pass
 
 
-class Binance(Exchange):
+class Binance(Candles):
     __semaphore = None
 
     def __new__(cls):
@@ -40,18 +40,19 @@ class Binance(Exchange):
         self.url = url
 
     @delay
-    async def __session(self, url, session, **params):
-        async with session.get(url, params=params) as response:
+    async def __session(self, session, **params):
+        async with session.get(self.url, params=params) as response:
             return await response.json()
 
-    async def __get_candles_task(self, url, session, **params):
-        async with self.__semaphore:
-            return await self.__session(url, session, **params)
+    async def __get_candles_task(self, session, **params):
+        if self.__semaphore is not None:
+            async with self.__semaphore:
+                return await self.__session(session, **params)
 
     async def get_candles(self, symbol, interval, start_time, end_time):
         if isinstance(interval, TimeInterval) and isinstance(start_time, datetime) and isinstance(end_time, datetime):
             async with aiohttp.ClientSession() as session:
-                tasks = [asyncio.create_task(self.__get_candles_task(self.url, session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
+                tasks = [asyncio.create_task(self.__get_candles_task(session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
 
                 for candles in asyncio.as_completed(tasks):
                     yield (
@@ -89,8 +90,8 @@ class Binance(Exchange):
 
 class Spot(Binance):
     def __init__(self):
-        super().__init__('https://api.binance.com/api/v3')
+        super().__init__('https://api.binance.com/api/v3/klines')
 
 class Future(Binance):
     def __init__(self):
-        super().__init__('https://fapi.binance.com/api/v1')
+        super().__init__('https://fapi.binance.com/api/v1/klines')

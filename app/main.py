@@ -1,9 +1,8 @@
 import asyncio
 import os
-import time
 from datetime import datetime, timedelta
 
-from binance import Future, Spot, TimeInterval
+from binance import Spot, TimeInterval
 
 import asyncpg
 
@@ -28,7 +27,7 @@ class DataProcessor:
         )
     
     async def create_ticket(self, task):
-        if type(task) == Task:
+        if isinstance(task, Task):
             async with self.pool.acquire() as connection:
                 schema = task.ticket
                 table = task.interval
@@ -47,7 +46,7 @@ class DataProcessor:
                         );''')
     
     async def insert_ticket(self, interface, task):
-        if type(task) == Task:
+        if isinstance(task, Task):
             async with self.pool.acquire() as connection:
                 async for candles in interface.get_candles(task.ticket, task.interval, task.start_time, task.end_time):
                     async with connection.transaction():
@@ -68,7 +67,6 @@ async def main():
     host = os.environ.get('HOST')
     port = os.environ.get('POSTGRES_PORT')
     database = os.environ.get('NAME')
-
 
     tasks = [
         Task('btcusdt', TimeInterval.INTERVAL_1D, datetime.now() - timedelta(days=10), datetime.now())
