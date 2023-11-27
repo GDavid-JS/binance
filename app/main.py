@@ -40,7 +40,7 @@ class TimeInterval(Enum):
     INTERVAL_1M = '1M'
 
     def to_milliseconds(self):
-        if 'min' in self.value:
+        if 'm' in self.value:
             return int(self.value[:-1]) * 60 * 1000
         elif 'h' in self.value:
             return int(self.value[:-1]) * 60 * 60 * 1000
@@ -53,13 +53,12 @@ class TimeInterval(Enum):
         else:
             raise ValueError("Invalid interval format")
 
-class Candles(ABC):
+class CandlesABC(ABC):
     @abstractmethod
     async def get_candles(self, symbol, interval, start_time, end_time):
         pass
 
-
-class Binance(Candles):
+class Candles(CandlesABC):
     __semaphore = None
 
     def __new__(cls):
@@ -68,24 +67,20 @@ class Binance(Candles):
 
         return super().__new__(cls)
     
-    def __init__(self, url=None):
-        self._url = url
-
     @delay
-    async def __session(self, session, **params):
-        if self._url is not None:
-            async with session.get(self._url, params=params) as response:
-                return await response.json()
+    async def __session(self, url, session, **params):
+        async with session.get(url, params=params) as response:
+            return await response.json()
 
-    async def __get_candles_task(self, session, **params):
+    async def __get_candles_task(self, url, session, **params):
         if self.__semaphore is not None:
             async with self.__semaphore:
-                return await self.__session(session, **params)
+                return await self.__session(url, session, **params)
 
-    async def get_candles(self, symbol, interval, start_time, end_time):
+    async def _get_candles(self, url, symbol, interval, start_time, end_time):
         if isinstance(interval, TimeInterval) and isinstance(start_time, datetime) and isinstance(end_time, datetime):
             async with aiohttp.ClientSession() as session:
-                tasks = [asyncio.create_task(self.__get_candles_task(session, **binance_task)) for binance_task in self.__get_binance_tasks(symbol, interval, start_time, end_time)]
+                tasks = [asyncio.create_task(self.__get_candles_task(url, session, **binance_task)) for binance_task in self.__get_tasks(symbol, interval, start_time, end_time)]
 
                 for candles in asyncio.as_completed(tasks):
                     yield (
@@ -97,7 +92,7 @@ class Binance(Candles):
                         for candl in await candles
                     )
 
-    def __get_binance_tasks(self, symbol, interval, start_time, end_time):
+    def __get_tasks(self, symbol, interval, start_time, end_time):
         params_list = []
         params = {
             'symbol': symbol.upper(),
@@ -120,13 +115,17 @@ class Binance(Candles):
 
         return params_list
 
-class Spot(Binance):
-    def __init__(self):
-        self._url = 'https://api.binance.com/api/v3/klines'
+class Spot(Candles):
+    __url = 'https://api.binance.com/api/v3/klines'
+    async def get_candles(self, symbol, interval, start_time, end_time):
+        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time)
+            yield candles
 
-class Future(Binance):
-    def __init__(self):
-        self._url = 'https://fapi.binance.com/api/v1/klines'
+class Future(Candles):
+    __url = 'https://fapi.binance.com/api/v1/klines'
+    async def get_candles(self, symbol, interval, start_time, end_time):
+        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time)
+            yield candles
 
 class Task:
     __slots__ = ('ticket', 'interval', 'start_time', 'end_time')
@@ -195,14 +194,15 @@ class TicketData:
                     await connection.execute(ticket_sql.create())
 
     async def insert_ticket(self, interface, ticket_sql, task):
-        if isinstance(task, Task) and isinstance(interface, Candles) and isinstance(ticket_sql, TicketSqlABC):
+        if isinstance(task, Task) and isinstance(interface, CandlesABC) and isinstance(ticket_sql, TicketSqlABC):
             async with self.connector.pool.acquire() as connection:
                 async for candles in interface.get_candles(task.ticket, task.interval, task.start_time, task.end_time):
-                    async with connection.transaction():
-                        await connection.executemany(
-                            ticket_sql.insert(),
-                            candles
-                    )
+                    print(candles)
+                    # async with connection.transaction():
+                    #     await connection.executemany(
+                    #         ticket_sql.insert(),
+                    #         candles
+                    # )
 
 async def main():
     user = os.environ.get('POSTGRES_USER')
@@ -217,11 +217,9 @@ async def main():
 
     insert_tasks = []
 
-
     spot = Spot()
     connector = DatabaseConnector()
     ticket_data = TicketData(connector)
-
 
     await connector.init_connection(user, password, host, port, database, 20)
     for task in tasks:
@@ -231,7 +229,6 @@ async def main():
         insert_tasks.append(asyncio.create_task(ticket_data.insert_ticket(spot, ticket_sql, task)))
     
     await asyncio.gather(*insert_tasks)
-
 
 if __name__ == '__main__':
     asyncio.run(main())
