@@ -3,3 +3,5 @@ asyncpg==0.28.0
 requests==2.31.0
 multipledispatch==1.0.0
 accessify==0.3.1
+SQLAlchemy==2.0.23
+aiopg==1.4.0

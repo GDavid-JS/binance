@@ -5,9 +5,16 @@ import time
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from enum import Enum
+from dataclasses import dataclass
 
-import asyncpg
 import aiohttp
+from sqlalchemy import MetaData, Table, Column, TIMESTAMP, Float
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+metadata = MetaData()
+
+Base = declarative_base(metadata=metadata)
 
 def delay(func):
     @functools.wraps(func)
@@ -58,7 +65,7 @@ class CandlesABC(ABC):
     async def get_candles(self, symbol, interval, start_time, end_time):
         pass
 
-class Candles(CandlesABC):
+class GetCandles(CandlesABC):
     __semaphore = None
 
     def __new__(cls):
@@ -80,7 +87,7 @@ class Candles(CandlesABC):
     async def _get_candles(self, url, symbol, interval, start_time, end_time):
         if isinstance(interval, TimeInterval) and isinstance(start_time, datetime) and isinstance(end_time, datetime):
             async with aiohttp.ClientSession() as session:
-                tasks = [asyncio.create_task(self.__get_candles_task(url, session, **binance_task)) for binance_task in self.__get_tasks(symbol, interval, start_time, end_time)]
+                tasks = [self.__get_candles_task(url, session, **binance_task) for binance_task in self.__get_tasks(symbol, interval, start_time, end_time)]
 
                 for candles in asyncio.as_completed(tasks):
                     yield (
@@ -115,94 +122,38 @@ class Candles(CandlesABC):
 
         return params_list
 
-class Spot(Candles):
+class Spot(GetCandles):
     __url = 'https://api.binance.com/api/v3/klines'
     async def get_candles(self, symbol, interval, start_time, end_time):
-        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time)
+        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time):
             yield candles
 
-class Future(Candles):
+class Future(GetCandles):
     __url = 'https://fapi.binance.com/api/v1/klines'
     async def get_candles(self, symbol, interval, start_time, end_time):
-        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time)
+        async for candles in self._get_candles(self.__url, symbol, interval, start_time, end_time):
             yield candles
 
+@dataclass
 class Task:
     __slots__ = ('ticket', 'interval', 'start_time', 'end_time')
 
-    def __init__(self, ticket, interval, start_time, end_time):
-        self.ticket = ticket
-        self.interval = interval
-        self.start_time = start_time
-        self.end_time = end_time
+    ticket: str
+    interval: str
+    start_time: datetime
+    end_time: datetime
 
-class DatabaseConnector:
-    async def init_connection(self, user, password, host, port, database, max_size):
-        self.pool = await asyncpg.create_pool(
-            user=user,
-            password=password,
-            host=host,
-            port=port,
-            database=database,
-            max_size=max_size
-        )
+async def create_tables(engine, tables):
+    async with engine.begin() as conn:
+        for table in tables:
+            await conn.run_sync(table.create, checkfirst=True)
 
-class TicketSqlABC(ABC):
-    @abstractmethod
-    def create(self):
-        pass
-
-    @abstractmethod
-    def insert_many(self):
-        pass
-
-
-class TicketSql(TicketSqlABC):
-    def __init__(self, schema, table):
-        self.schema = schema
-        self.table = table
-
-    def create(self):
-        return f'''
-        CREATE SCHEMA IF NOT EXISTS "{self.schema}";
-        CREATE TABLE IF NOT EXISTS "{self.schema}"."{self.table}" (
-            time_open TIMESTAMP NOT NULL,
-            open DOUBLE PRECISION NOT NULL,
-            high DOUBLE PRECISION NOT NULL,
-            low DOUBLE PRECISION NOT NULL,
-            close DOUBLE PRECISION NOT NULL,
-            volume DOUBLE PRECISION NOT NULL,
-            time_close TIMESTAMP(3) PRIMARY KEY
-        );'''
-
-    def insert_many(self):
-        return f'''
-        INSERT INTO "{self.schema}"."{self.table}"
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (time_close)
-        DO NOTHING;
-        '''
-
-class TicketData:
-    def __init__(self, connector):
-        self.connector = connector
-
-    async def create_ticket(self, ticket_sql):
-        if isinstance(ticket_sql, TicketSqlABC):
-            async with self.connector.pool.acquire() as connection:
-                async with connection.transaction():
-                    await connection.execute(ticket_sql.create())
-
-    async def insert_ticket(self, interface, ticket_sql, task):
-        if isinstance(task, Task) and isinstance(interface, CandlesABC) and isinstance(ticket_sql, TicketSqlABC):
-            async with self.connector.pool.acquire() as connection:
-                async for candles in interface.get_candles(task.ticket, task.interval, task.start_time, task.end_time):
-                    print(candles)
-                    # async with connection.transaction():
-                    #     await connection.executemany(
-                    #         ticket_sql.insert(),
-                    #         candles
-                    # )
+async def insert_ticket(engine, interface, task, table_name):
+    async with AsyncSession(engine) as session:
+        if isinstance(task, Task) and isinstance(interface, CandlesABC):
+            async for candles in interface.get_candles(task.ticket, task.interval, task.start_time, task.end_time):
+                await session.execute(Table(table_name, metadata).insert().values(tuple(candles)))
+                await session.commit()
 
 async def main():
     user = os.environ.get('POSTGRES_USER')
@@ -211,23 +162,35 @@ async def main():
     port = os.environ.get('POSTGRES_PORT')
     database = os.environ.get('NAME')
 
+    database_url = f'postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}'
+
+    engine = create_async_engine(database_url, pool_size=20)
+
     tasks = [
         Task('btcusdt', TimeInterval.INTERVAL_1D, datetime.now() - timedelta(days=10), datetime.now())
     ]
 
-    insert_tasks = []
-
     spot = Spot()
-    connector = DatabaseConnector()
-    ticket_data = TicketData(connector)
 
-    await connector.init_connection(user, password, host, port, database, 20)
+    insert_tasks = []
+    tables = []
+
     for task in tasks:
-        ticket_sql = TicketSql(task.ticket, task.interval)
+        table_name = f'{task.ticket}_{task.interval.value}'
+        tables.append(Table(
+            table_name, metadata,
+            Column('time_open', TIMESTAMP, nullable=False),
+            Column('open', Float, nullable=False),
+            Column('high', Float, nullable=False),
+            Column('low', Float, nullable=False),
+            Column('close', Float, nullable=False),
+            Column('volume', Float, nullable=False),
+            Column('time_close', TIMESTAMP(3), nullable=False)
+        ))
 
-        await ticket_data.create_ticket(ticket_sql)
-        insert_tasks.append(asyncio.create_task(ticket_data.insert_ticket(spot, ticket_sql, task)))
-    
+        insert_tasks.append(insert_ticket(engine, spot, task, table_name))
+
+    await create_tables(engine, tables)
     await asyncio.gather(*insert_tasks)
 
 if __name__ == '__main__':
