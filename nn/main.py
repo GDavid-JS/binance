@@ -8,7 +8,7 @@ from tensorflow.keras.optimizers import Adam, SGD, RMSprop, Adamax
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 
-from data import transfer_data, DataNN
+from data import transfer_data, get_data
 
 def prepare_data(data, inp_len, X_list, y_list):
     n = data.shape[0] - inp_len
@@ -56,17 +56,6 @@ def main():
         Dense(1, activation='sigmoid')
     ])
 
-    # model = Sequential([
-    #     LSTM(256, input_shape=(inp_len, 1), activation='relu'),
-    #     Dense(1, activation='sigmoid')
-    # ])
-
-    # model = Sequential([
-    #     LSTM(64, input_shape=(inp_len, 1)),
-    #     # LSTM(100),
-    #     Dense(1, activation='sigmoid')
-    # ])
-
 
     model = load_model(input_path)
 
@@ -76,7 +65,7 @@ def main():
     model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['accuracy'])
 
 
-    dataNN = DataNN(**database)
+    # dataNN = DataNN(**database)
     start_time = time.time()
     data = dataNN.get_data(coin, timeframe)
     # data_gen = dataNN.get_timeframe_data(timeframe)

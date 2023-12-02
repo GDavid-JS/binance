@@ -57,8 +57,7 @@ class TimeInterval(Enum):
             return int(self.value[:-1]) * 7 * 24 * 60 * 60 * 1000
         elif 'M' in self.value:
             return int(self.value[:-1]) * 30 * 24 * 60 * 60 * 1000
-        else:
-            raise ValueError("Invalid interval format")
+        raise ValueError("Invalid interval format")
 
 class CandlesABC(ABC):
     @abstractmethod
